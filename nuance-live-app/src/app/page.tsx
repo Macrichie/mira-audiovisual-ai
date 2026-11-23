@@ -19,6 +19,8 @@ export default function CallPage() {
   const [greeted, setGreeted] = useState(false);
   const [endMessage, setEndMessage] = useState<string | null>(null);
   const [openLesson, setOpenLesson] = useState<Lesson | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [queueInfo, setQueueInfo] = useState<string | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   const { state, error, conversation, videoRef, audioRef, start, end } =
@@ -139,6 +141,7 @@ export default function CallPage() {
       const type = event.type as string;
 
       if (type === "session.output_transcript.delta") {
+        setIsSpeaking(true);
         setPersonaDelta((prev) => prev + String(event.delta ?? ""));
       }
 
@@ -146,6 +149,7 @@ export default function CallPage() {
         type === "session.output_transcript.done" ||
         type === "session.output_audio.done"
       ) {
+        setIsSpeaking(false);
         setPersonaDelta((prev) => {
           if (prev.trim()) {
             setTranscriptLines((lines) => [
@@ -176,6 +180,18 @@ export default function CallPage() {
     if (!conversation) return;
 
     const removeChange = conversation.onChange((event) => {
+      if (event.type === "queue-changed") {
+        const pos = event.position;
+        const wait = event.estimatedWaitSeconds;
+        if (pos > 0 && wait != null) {
+          setQueueInfo(`Position ${pos} · ~${Math.ceil(wait)}s`);
+        } else if (pos > 0) {
+          setQueueInfo(`Position ${pos}`);
+        } else {
+          setQueueInfo(null);
+        }
+      }
+
       if (event.type === "avatar-presented" && !greeted) {
         setGreeted(true);
         conversation.sendInterfaceEvent({
@@ -229,6 +245,8 @@ export default function CallPage() {
     setGreeted(false);
     setEndMessage(null);
     setOpenLesson(null);
+    setIsSpeaking(false);
+    setQueueInfo(null);
     start();
   }, [start]);
 
@@ -278,14 +296,34 @@ export default function CallPage() {
               />
               <audio ref={audioRef} autoPlay />
 
-              {isConnecting && (
-                <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
-                  <div className="flex items-center gap-3">
-                    <div className="w-4 h-4 rounded-full bg-yellow-400 animate-pulse" />
-                    <span className="text-lg">Connecting to Mira...</span>
+              {/* Idle placeholder */}
+              {state === "idle" && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900">
+                  <div className="w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center mb-3">
+                    <svg className="w-8 h-8 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0" />
+                    </svg>
                   </div>
+                  <span className="text-gray-500 text-sm">Click Start Call to talk with Mira</span>
                 </div>
               )}
+
+              {/* Connecting / queued */}
+              {isConnecting && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900/80">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-4 h-4 rounded-full bg-yellow-400 animate-pulse" />
+                    <span className="text-lg">
+                      {state === "queued" ? "Waiting for a slot..." : "Connecting to Mira..."}
+                    </span>
+                  </div>
+                  {queueInfo && (
+                    <span className="text-sm text-gray-400">{queueInfo}</span>
+                  )}
+                </div>
+              )}
+
+              {/* Disconnected */}
               {state === "disconnected" && (
                 <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
                   <span className="text-lg text-gray-400">
@@ -297,13 +335,36 @@ export default function CallPage() {
 
             {/* Connection status */}
             {isConnected && (
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-3 h-3 rounded-full bg-green-500" />
-                <span className="text-sm text-green-400">Live</span>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-green-500" />
+                  <span className="text-sm text-green-400">Live</span>
+                </div>
+                <div className="h-4 w-px bg-gray-700" />
+                <div className="flex items-center gap-1.5">
+                  {isSpeaking ? (
+                    <>
+                      <div className="flex items-end gap-0.5 h-3">
+                        <div className="w-0.5 bg-blue-400 rounded-full animate-[pulse_0.5s_ease-in-out_infinite]" style={{ height: "60%" }} />
+                        <div className="w-0.5 bg-blue-400 rounded-full animate-[pulse_0.5s_ease-in-out_infinite_0.15s]" style={{ height: "100%" }} />
+                        <div className="w-0.5 bg-blue-400 rounded-full animate-[pulse_0.5s_ease-in-out_infinite_0.3s]" style={{ height: "40%" }} />
+                      </div>
+                      <span className="text-xs text-blue-400">Mira speaking</span>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-2 h-2 rounded-full bg-gray-600" />
+                      <span className="text-xs text-gray-500">Listening</span>
+                    </>
+                  )}
+                </div>
                 {openLesson && (
-                  <span className="text-xs text-gray-500 ml-2">
-                    Viewing: {openLesson.title}
-                  </span>
+                  <>
+                    <div className="h-4 w-px bg-gray-700" />
+                    <span className="text-xs text-gray-500 truncate max-w-48">
+                      Viewing: {openLesson.title}
+                    </span>
+                  </>
                 )}
               </div>
             )}
