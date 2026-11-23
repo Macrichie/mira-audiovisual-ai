@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getUserNotes, saveUserNotes } from "@/lib/user-notes";
 
-const NUANCE_API_URL = "https://api.nuancelabs.ai/v1";
+const NUANCE_API_URL = "https://api.nuancelabs.ai";
 
 export async function POST(request: Request) {
   const apiKey = process.env.NUANCE_API_KEY;
