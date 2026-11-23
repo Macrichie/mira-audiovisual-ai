@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useCallback, useState } from "react";
 import { useNuanceConversation } from "@nuancelabs/js-sdk/react";
+import { ApiError } from "@nuancelabs/js-sdk";
 
 type TranscriptLine = {
   speaker: "persona" | "user";
@@ -12,6 +13,7 @@ export default function CallPage() {
   const [transcriptLines, setTranscriptLines] = useState<TranscriptLine[]>([]);
   const [personaDelta, setPersonaDelta] = useState("");
   const [greeted, setGreeted] = useState(false);
+  const [endMessage, setEndMessage] = useState<string | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   const { state, error, conversation, videoRef, audioRef, start, end } =
@@ -71,12 +73,12 @@ export default function CallPage() {
     return removeInterface;
   }, [conversation]);
 
-  // Send greeting once avatar is presented
+  // Send greeting on avatar-presented, track unexpected disconnection
   useEffect(() => {
-    if (!conversation || greeted) return;
+    if (!conversation) return;
 
     const removeChange = conversation.onChange((event) => {
-      if (event.type === "avatar-presented") {
+      if (event.type === "avatar-presented" && !greeted) {
         setGreeted(true);
         conversation.sendInterfaceEvent({
           type: "response.create",
@@ -85,6 +87,19 @@ export default function CallPage() {
               "Greet the user warmly. Introduce yourself as Mira and ask what they'd like to learn about today.",
           },
         });
+      }
+
+      if (event.type === "session-ended") {
+        const reason = event.reason;
+        if (reason === "connection-lost") {
+          setEndMessage("Connection lost. You can reconnect.");
+        } else if (reason === "policy-violation") {
+          setEndMessage("Session ended due to a policy violation.");
+        } else if (reason === "age-check") {
+          setEndMessage("Session ended: age verification required.");
+        } else if (reason === "time-limit") {
+          setEndMessage("Session time limit reached.");
+        }
       }
     });
 
@@ -101,6 +116,7 @@ export default function CallPage() {
     setTranscriptLines([]);
     setPersonaDelta("");
     setGreeted(false);
+    setEndMessage(null);
     start();
   }, [start]);
 
@@ -108,6 +124,15 @@ export default function CallPage() {
     state === "idle" || state === "disconnected" || state === "failed";
   const isConnecting = state === "connecting" || state === "queued";
   const isConnected = state === "connected";
+
+  // Derive user-friendly error message
+  const errorMessage = error
+    ? error instanceof ApiError && error.status === 429
+      ? `Daily credits exhausted.${error.renewsAt ? ` Renews at ${new Date(error.renewsAt).toLocaleTimeString()}.` : ""}`
+      : error instanceof ApiError && error.status === 503
+        ? "Nuance is busy right now. Please try again in a moment."
+        : error.message
+    : null;
 
   return (
     <main className="flex flex-col items-center min-h-screen bg-gray-950 text-white p-6">
@@ -136,7 +161,9 @@ export default function CallPage() {
         )}
         {state === "disconnected" && (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
-            <span className="text-lg text-gray-400">Call ended</span>
+            <span className="text-lg text-gray-400">
+              {endMessage ?? "Call ended"}
+            </span>
           </div>
         )}
       </div>
@@ -150,9 +177,9 @@ export default function CallPage() {
       )}
 
       {/* Error display */}
-      {error && (
+      {errorMessage && (
         <div className="mb-4 p-3 bg-red-900/50 border border-red-700 rounded-lg text-red-300 text-sm max-w-lg text-center">
-          {error.message}
+          {errorMessage}
         </div>
       )}
 
