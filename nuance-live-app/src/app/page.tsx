@@ -33,6 +33,72 @@ export default function CallPage() {
       },
     });
 
+  // Handle tool calls from the persona
+  useEffect(() => {
+    if (!conversation) return;
+
+    const removeToolHandler = conversation.onToolCall(async (call) => {
+      let result: string;
+
+      switch (call.name) {
+        case "get_current_lesson":
+          // Phase 3 will load from storage; for now return a stub
+          result = JSON.stringify({
+            week: 1,
+            lesson_id: "week1-lesson1",
+            title: "What Is AI? A Plain-English Overview",
+            status: "in_progress",
+          });
+          break;
+
+        case "mark_lesson_done": {
+          const lessonId = call.arguments?.lesson_id ?? "unknown";
+          // Phase 3 will persist this; for now acknowledge it
+          result = JSON.stringify({
+            marked: true,
+            lesson_id: lessonId,
+            next_lesson: {
+              lesson_id: "week1-lesson2",
+              title: "How Businesses Use AI Today",
+            },
+          });
+          await conversation.sendToolResult(call.callId, result, {
+            reply: false,
+          });
+          return; // reply: false — persona doesn't narrate the result
+        }
+
+        case "search_web": {
+          const query = String(call.arguments?.query ?? "");
+          // Strip phone numbers from results (Nuance policy)
+          const stripped = (text: string) =>
+            text.replace(
+              /(\+?\d[\d\s\-().]{7,}\d)/g,
+              "[phone removed]"
+            );
+          // Phase 3+ will call a real search API; for now return stub results
+          result = stripped(
+            JSON.stringify({
+              snippets: [
+                `AI (Artificial Intelligence) refers to computer systems that can perform tasks typically requiring human intelligence. Search query: "${query}"`,
+                "Machine learning is a subset of AI where systems learn from data rather than being explicitly programmed.",
+                "Common AI applications include virtual assistants, recommendation systems, and image recognition.",
+              ],
+            })
+          );
+          break;
+        }
+
+        default:
+          result = JSON.stringify({ error: `Unknown tool: ${call.name}` });
+      }
+
+      await conversation.sendToolResult(call.callId, result);
+    });
+
+    return removeToolHandler;
+  }, [conversation]);
+
   // Listen for interface events (transcript)
   useEffect(() => {
     if (!conversation) return;

@@ -40,8 +40,19 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         personality: {
-          system_prompt:
-            "You are Mira, a friendly and encouraging AI fluency coach. You help nontechnical professionals understand AI concepts week by week. You speak clearly and use simple analogies. When greeting the user, introduce yourself as Mira and ask what they'd like to learn about today.",
+          system_prompt: [
+            "You are Mira, a friendly and encouraging AI fluency coach.",
+            "You help nontechnical professionals understand AI concepts week by week.",
+            "You speak clearly and use simple analogies.",
+            "",
+            "Tool usage rules:",
+            "- When the user asks what lesson or week they are on, use the get_current_lesson tool.",
+            "- When the user says they finished a lesson or wants to mark it done, use the mark_lesson_done tool.",
+            "- When the user asks you to look something up or search for information, use the search_web tool.",
+            "- When you call a tool, say 'Checking now...' or 'Let me look that up...' while waiting. Do NOT say 'Done!' before the result comes back.",
+            "",
+            "When greeting the user, introduce yourself as Mira and ask what they'd like to learn about today.",
+          ].join("\n"),
           persona_id: "mira",
         },
         end_user_id: body.end_user_id,
@@ -51,7 +62,46 @@ export async function POST(request: Request) {
             type: "responses",
             responses: {
               model: "nuance",
-              tools: [],
+              tools: [
+                {
+                  type: "function",
+                  name: "get_current_lesson",
+                  description:
+                    "Returns the user's current lesson and week in the AI fluency roadmap.",
+                },
+                {
+                  type: "function",
+                  name: "mark_lesson_done",
+                  description:
+                    "Marks the user's current lesson as complete and advances them to the next one.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      lesson_id: {
+                        type: "string",
+                        description: "The lesson identifier to mark as done.",
+                      },
+                    },
+                    required: ["lesson_id"],
+                  },
+                },
+                {
+                  type: "function",
+                  name: "search_web",
+                  description:
+                    "Searches the web for information. Returns up to 5 short text snippets.",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      query: {
+                        type: "string",
+                        description: "The search query.",
+                      },
+                    },
+                    required: ["query"],
+                  },
+                },
+              ],
             },
           },
           runtime_tools: {
