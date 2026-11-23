@@ -38,46 +38,42 @@ export default function CallPage() {
     if (!conversation) return;
 
     const removeToolHandler = conversation.onToolCall(async (call) => {
+      const END_USER_ID = "demo-user";
       let result: string;
 
       switch (call.name) {
-        case "get_current_lesson":
-          // Phase 3 will load from storage; for now return a stub
-          result = JSON.stringify({
-            week: 1,
-            lesson_id: "week1-lesson1",
-            title: "What Is AI? A Plain-English Overview",
-            status: "in_progress",
-          });
+        case "get_current_lesson": {
+          const res = await fetch(
+            `/api/user-notes?end_user_id=${encodeURIComponent(END_USER_ID)}`
+          );
+          result = await res.text();
           break;
+        }
 
         case "mark_lesson_done": {
           const lessonId = call.arguments?.lesson_id ?? "unknown";
-          // Phase 3 will persist this; for now acknowledge it
-          result = JSON.stringify({
-            marked: true,
-            lesson_id: lessonId,
-            next_lesson: {
-              lesson_id: "week1-lesson2",
-              title: "How Businesses Use AI Today",
-            },
+          const res = await fetch("/api/user-notes", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              end_user_id: END_USER_ID,
+              lesson_id: lessonId,
+            }),
           });
+          result = await res.text();
           await conversation.sendToolResult(call.callId, result, {
             reply: false,
           });
-          return; // reply: false — persona doesn't narrate the result
+          return;
         }
 
         case "search_web": {
           const query = String(call.arguments?.query ?? "");
           // Strip phone numbers from results (Nuance policy)
-          const stripped = (text: string) =>
-            text.replace(
-              /(\+?\d[\d\s\-().]{7,}\d)/g,
-              "[phone removed]"
-            );
-          // Phase 3+ will call a real search API; for now return stub results
-          result = stripped(
+          const stripPhones = (text: string) =>
+            text.replace(/(\+?\d[\d\s\-().]{7,}\d)/g, "[phone removed]");
+          // TODO: call a real search API in production
+          result = stripPhones(
             JSON.stringify({
               snippets: [
                 `AI (Artificial Intelligence) refers to computer systems that can perform tasks typically requiring human intelligence. Search query: "${query}"`,
@@ -165,6 +161,21 @@ export default function CallPage() {
           setEndMessage("Session ended: age verification required.");
         } else if (reason === "time-limit") {
           setEndMessage("Session time limit reached.");
+        }
+
+        // Post-call: save transcript notes for memory
+        const convId = conversation.id;
+        if (convId) {
+          fetch("/api/transcript", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              conversation_id: convId,
+              end_user_id: "demo-user",
+            }),
+          }).catch(() => {
+            // Best-effort — don't block the user
+          });
         }
       }
     });
