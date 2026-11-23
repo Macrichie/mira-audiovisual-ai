@@ -3,17 +3,22 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import { useNuanceConversation } from "@nuancelabs/js-sdk/react";
 import { ApiError } from "@nuancelabs/js-sdk";
+import LessonBrowser from "@/components/lesson-browser";
+import type { Lesson } from "@/lib/roadmap";
 
 type TranscriptLine = {
   speaker: "persona" | "user";
   text: string;
 };
 
+const END_USER_ID = "demo-user";
+
 export default function CallPage() {
   const [transcriptLines, setTranscriptLines] = useState<TranscriptLine[]>([]);
   const [personaDelta, setPersonaDelta] = useState("");
   const [greeted, setGreeted] = useState(false);
   const [endMessage, setEndMessage] = useState<string | null>(null);
+  const [openLesson, setOpenLesson] = useState<Lesson | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   const { state, error, conversation, videoRef, audioRef, start, end } =
@@ -22,7 +27,7 @@ export default function CallPage() {
         const res = await fetch("/api/session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ end_user_id: "demo-user" }),
+          body: JSON.stringify({ end_user_id: END_USER_ID }),
         });
         if (!res.ok) {
           const data = await res.json();
@@ -33,12 +38,44 @@ export default function CallPage() {
       },
     });
 
+  // --- Context awareness: notify persona of lesson navigation ---
+  const handleLessonOpen = useCallback(
+    (lesson: Lesson) => {
+      setOpenLesson(lesson);
+      if (conversation && state === "connected") {
+        // Tell persona what the user is looking at (quiet context)
+        conversation.append(
+          "thinking",
+          `User opened Week ${lesson.week} lesson: "${lesson.title}". The lesson is about: ${lesson.summary.substring(0, 200)}`
+        );
+        // Hold the floor while the user reads
+        conversation.sendInterfaceEvent({ type: "session.floor.hold" });
+      }
+    },
+    [conversation, state]
+  );
+
+  const handleLessonClose = useCallback(() => {
+    const wasOpen = openLesson;
+    setOpenLesson(null);
+    if (conversation && state === "connected" && wasOpen) {
+      // Interrupt if persona was explaining something about the lesson
+      conversation.sendInterfaceEvent({
+        type: "session.output_audio.interrupt",
+      });
+      // Let persona know user navigated away
+      conversation.append(
+        "thinking",
+        `User closed the lesson "${wasOpen.title}" and returned to the lesson list.`
+      );
+    }
+  }, [conversation, state, openLesson]);
+
   // Handle tool calls from the persona
   useEffect(() => {
     if (!conversation) return;
 
     const removeToolHandler = conversation.onToolCall(async (call) => {
-      const END_USER_ID = "demo-user";
       let result: string;
 
       switch (call.name) {
@@ -69,7 +106,6 @@ export default function CallPage() {
 
         case "search_web": {
           const query = String(call.arguments?.query ?? "");
-          // Strip phone numbers from results (Nuance policy)
           const stripPhones = (text: string) =>
             text.replace(/(\+?\d[\d\s\-().]{7,}\d)/g, "[phone removed]");
           // TODO: call a real search API in production
@@ -171,11 +207,9 @@ export default function CallPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               conversation_id: convId,
-              end_user_id: "demo-user",
+              end_user_id: END_USER_ID,
             }),
-          }).catch(() => {
-            // Best-effort — don't block the user
-          });
+          }).catch(() => {});
         }
       }
     });
@@ -194,6 +228,7 @@ export default function CallPage() {
     setPersonaDelta("");
     setGreeted(false);
     setEndMessage(null);
+    setOpenLesson(null);
     start();
   }, [start]);
 
@@ -202,7 +237,6 @@ export default function CallPage() {
   const isConnecting = state === "connecting" || state === "queued";
   const isConnected = state === "connected";
 
-  // Derive user-friendly error message
   const errorMessage = error
     ? error instanceof ApiError && error.status === 429
       ? `Daily credits exhausted.${error.renewsAt ? ` Renews at ${new Date(error.renewsAt).toLocaleTimeString()}.` : ""}`
@@ -212,108 +246,132 @@ export default function CallPage() {
     : null;
 
   return (
-    <main className="flex flex-col items-center min-h-screen bg-gray-950 text-white p-6">
-      <h1 className="text-2xl font-bold mb-6">
-        Ola Explains — AI Fluency Coach
-      </h1>
+    <main className="min-h-screen bg-gray-950 text-white">
+      <div className="max-w-6xl mx-auto p-6">
+        <h1 className="text-2xl font-bold mb-6">
+          Ola Explains — AI Fluency Coach
+        </h1>
 
-      {/* Persona video */}
-      <div className="relative w-full max-w-lg aspect-video bg-gray-900 rounded-xl overflow-hidden mb-4">
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          className="w-full h-full object-cover"
-        />
-        <audio ref={audioRef} autoPlay />
-
-        {/* Status overlay */}
-        {isConnecting && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
-            <div className="flex items-center gap-3">
-              <div className="w-4 h-4 rounded-full bg-yellow-400 animate-pulse" />
-              <span className="text-lg">Connecting to Mira...</span>
+        <div className="flex flex-col lg:flex-row gap-6">
+          {/* Left: Lesson browser */}
+          <aside className="lg:w-80 shrink-0">
+            <div className="bg-gray-900 rounded-xl p-4">
+              <h2 className="text-sm font-semibold text-gray-400 mb-3">
+                AI Fluency Roadmap
+              </h2>
+              <LessonBrowser
+                onLessonOpen={handleLessonOpen}
+                onLessonClose={handleLessonClose}
+              />
             </div>
-          </div>
-        )}
-        {state === "disconnected" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
-            <span className="text-lg text-gray-400">
-              {endMessage ?? "Call ended"}
-            </span>
-          </div>
-        )}
-      </div>
+          </aside>
 
-      {/* Connection status */}
-      {isConnected && (
-        <div className="flex items-center gap-2 mb-4">
-          <div className="w-3 h-3 rounded-full bg-green-500" />
-          <span className="text-sm text-green-400">Live</span>
-        </div>
-      )}
+          {/* Right: Call area */}
+          <div className="flex-1 flex flex-col items-center">
+            {/* Persona video */}
+            <div className="relative w-full max-w-lg aspect-video bg-gray-900 rounded-xl overflow-hidden mb-4">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                className="w-full h-full object-cover"
+              />
+              <audio ref={audioRef} autoPlay />
 
-      {/* Error display */}
-      {errorMessage && (
-        <div className="mb-4 p-3 bg-red-900/50 border border-red-700 rounded-lg text-red-300 text-sm max-w-lg text-center">
-          {errorMessage}
-        </div>
-      )}
+              {isConnecting && (
+                <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
+                  <div className="flex items-center gap-3">
+                    <div className="w-4 h-4 rounded-full bg-yellow-400 animate-pulse" />
+                    <span className="text-lg">Connecting to Mira...</span>
+                  </div>
+                </div>
+              )}
+              {state === "disconnected" && (
+                <div className="absolute inset-0 flex items-center justify-center bg-gray-900/80">
+                  <span className="text-lg text-gray-400">
+                    {endMessage ?? "Call ended"}
+                  </span>
+                </div>
+              )}
+            </div>
 
-      {/* Controls */}
-      <div className="flex gap-4 mb-6">
-        {isIdle && (
-          <button
-            onClick={handleStart}
-            className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-lg font-semibold transition-colors cursor-pointer"
-          >
-            {state === "disconnected" || state === "failed"
-              ? "Start New Call"
-              : "Start Call"}
-          </button>
-        )}
-        {(isConnecting || isConnected) && (
-          <button
-            onClick={() => end()}
-            className="px-6 py-3 bg-red-600 hover:bg-red-500 rounded-lg font-semibold transition-colors cursor-pointer"
-          >
-            End Call
-          </button>
-        )}
-      </div>
-
-      {/* Transcript */}
-      {(transcriptLines.length > 0 || personaDelta) && (
-        <div className="w-full max-w-lg bg-gray-900 rounded-xl p-4 max-h-64 overflow-y-auto">
-          <h2 className="text-sm font-semibold text-gray-400 mb-3">
-            Transcript
-          </h2>
-          <div className="space-y-2">
-            {transcriptLines.map((line, i) => (
-              <div key={i} className="text-sm">
-                <span
-                  className={
-                    line.speaker === "persona"
-                      ? "text-blue-400 font-medium"
-                      : "text-green-400 font-medium"
-                  }
-                >
-                  {line.speaker === "persona" ? "Mira" : "You"}:
-                </span>{" "}
-                <span className="text-gray-200">{line.text}</span>
-              </div>
-            ))}
-            {personaDelta && (
-              <div className="text-sm">
-                <span className="text-blue-400 font-medium">Mira:</span>{" "}
-                <span className="text-gray-300">{personaDelta}</span>
-                <span className="animate-pulse">|</span>
+            {/* Connection status */}
+            {isConnected && (
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-3 h-3 rounded-full bg-green-500" />
+                <span className="text-sm text-green-400">Live</span>
+                {openLesson && (
+                  <span className="text-xs text-gray-500 ml-2">
+                    Viewing: {openLesson.title}
+                  </span>
+                )}
               </div>
             )}
-            <div ref={transcriptEndRef} />
+
+            {/* Error display */}
+            {errorMessage && (
+              <div className="mb-4 p-3 bg-red-900/50 border border-red-700 rounded-lg text-red-300 text-sm max-w-lg text-center">
+                {errorMessage}
+              </div>
+            )}
+
+            {/* Controls */}
+            <div className="flex gap-4 mb-6">
+              {isIdle && (
+                <button
+                  onClick={handleStart}
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-500 rounded-lg font-semibold transition-colors cursor-pointer"
+                >
+                  {state === "disconnected" || state === "failed"
+                    ? "Start New Call"
+                    : "Start Call"}
+                </button>
+              )}
+              {(isConnecting || isConnected) && (
+                <button
+                  onClick={() => end()}
+                  className="px-6 py-3 bg-red-600 hover:bg-red-500 rounded-lg font-semibold transition-colors cursor-pointer"
+                >
+                  End Call
+                </button>
+              )}
+            </div>
+
+            {/* Transcript */}
+            {(transcriptLines.length > 0 || personaDelta) && (
+              <div className="w-full max-w-lg bg-gray-900 rounded-xl p-4 max-h-64 overflow-y-auto">
+                <h2 className="text-sm font-semibold text-gray-400 mb-3">
+                  Transcript
+                </h2>
+                <div className="space-y-2">
+                  {transcriptLines.map((line, i) => (
+                    <div key={i} className="text-sm">
+                      <span
+                        className={
+                          line.speaker === "persona"
+                            ? "text-blue-400 font-medium"
+                            : "text-green-400 font-medium"
+                        }
+                      >
+                        {line.speaker === "persona" ? "Mira" : "You"}:
+                      </span>{" "}
+                      <span className="text-gray-200">{line.text}</span>
+                    </div>
+                  ))}
+                  {personaDelta && (
+                    <div className="text-sm">
+                      <span className="text-blue-400 font-medium">Mira:</span>{" "}
+                      <span className="text-gray-300">{personaDelta}</span>
+                      <span className="animate-pulse">|</span>
+                    </div>
+                  )}
+                  <div ref={transcriptEndRef} />
+                </div>
+              </div>
+            )}
           </div>
         </div>
-      )}
+      </div>
     </main>
   );
 }
