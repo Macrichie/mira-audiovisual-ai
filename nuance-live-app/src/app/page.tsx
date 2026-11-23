@@ -14,6 +14,7 @@ type TranscriptLine = {
 const END_USER_ID = "demo-user";
 
 export default function CallPage() {
+  const [mounted, setMounted] = useState(false);
   const [transcriptLines, setTranscriptLines] = useState<TranscriptLine[]>([]);
   const [personaDelta, setPersonaDelta] = useState("");
   const [greeted, setGreeted] = useState(false);
@@ -22,6 +23,8 @@ export default function CallPage() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [queueInfo, setQueueInfo] = useState<string | null>(null);
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => setMounted(true), []);
 
   const { state, error, conversation, videoRef, audioRef, start, end } =
     useNuanceConversation({
@@ -262,6 +265,18 @@ export default function CallPage() {
         ? "Nuance is busy right now. Please try again in a moment."
         : error.message
     : null;
+
+  if (!mounted) {
+    return (
+      <main className="min-h-screen bg-gray-950 text-white">
+        <div className="max-w-6xl mx-auto p-6">
+          <h1 className="text-2xl font-bold mb-6">
+            Ola Explains — AI Fluency Coach
+          </h1>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-gray-950 text-white">
